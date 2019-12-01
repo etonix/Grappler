@@ -1,9 +1,7 @@
-// Written for Shadowed Souls Gaming
-// 11/20/2019 - Thomas Pearce
-using UnityEngine;
+﻿using UnityEngine;
 using UnityStandardAssets.Characters.ThirdPerson;
 
-namespace ShadowedSouls
+namespace ShadowedSouls.Items
 {
     public class GrapplingHook : MonoBehaviour
     {
@@ -20,6 +18,8 @@ namespace ShadowedSouls
         [Tooltip("Re-enables kinematics on the player once done grappling.")]
         public bool resetKinematic = false;
 
+        private GUIStyle style = new GUIStyle();
+
         // [CAN BE CHANGED]
         private ThirdPersonCharacter playerControl;         // Unity Standard Assets 
         private float heightOffset;                         // The height of the player transform
@@ -32,53 +32,81 @@ namespace ShadowedSouls
         private Rigidbody trb;                              // Rigidbody of the grappling hook.
 
 
-        [SerializeField] private bool isSecured = false, firedHook = false;         // For debug and script purposes.
-        private Rigidbody rb;                                                       // Player's attached rigidbody.
+        [SerializeField] private bool isSecured = false, firedHook = false;     // For debug and script purposes.
+        [SerializeField] private bool isTargeting = false;                      // For debug and script purposes.
+        private Rigidbody rb;                                                   // Player's attached rigidbody.
 
-        private float step;                                                         // Grappling movement broken up
-        private float momentum;                                                     // Grappling speed build up
+        private float step;                                                     // Grappling movement broken up
+        private float momentum;                                                 // Grappling speed build up
 
-        private bool onGrappleSurface;                                              // Are we standing on a hookable surface?
+        private bool onGrappleSurface;                                          // Are we standing on a hookable surface?
 
-        private Ray ray;                                                            // Raycasting. Everybody Loves Ray!
-        private RaycastHit hit;                                                     // Where'd Ray hit that guy at?
+        private Ray ray;                                                        // Raycasting. Everybody Loves Ray!
+        private RaycastHit hit;                                                 // Where'd Ray hit that guy at?
         #endregion
 
     #region StartUpdates
         void Start()
         {
             // [CAN BE CHANGED]
-            playerControl = GetComponentInParent<ThirdPersonCharacter>();
+            playerControl = GetComponent<ThirdPersonCharacter>();
 
             // [LEAVE ALONE BEYOND HERE]
-            rb = playerControl.GetComponent<Rigidbody>();
-            heightOffset = playerControl.GetComponent<CapsuleCollider>().height;
+            rb = GetComponent<Rigidbody>();
+            heightOffset = GetComponent<CapsuleCollider>().height;
         }
 
         void FixedUpdate()
         {
-            if (!firedHook)
+            if (!firedHook && !isSecured)
             {
                 Ray ray = new Ray(mainCamera.position, mainCamera.forward);
-                if (Input.GetKeyDown(KeyCode.Mouse1) == true)
+                if (Physics.Raycast(ray, out hit, maxDistance))
                 {
-                    if (Physics.Raycast(ray, out RaycastHit hitt, maxDistance))
+                    if (hit.collider.tag == "Hookable")
                     {
-                        if (hitt.collider.tag == "Hookable" || hitt.collider.tag == "Climbable")
+                        if (Vector3.Distance(transform.position, hit.point) > 5f)
+                            isTargeting = true;
+                        else isTargeting = false;
+                    }
+                    else isTargeting = false;
+                }
+                else isTargeting = false;
+
+
+                if (isTargeting)
+                {
+                    if (hit.collider.tag == "Hookable")
+                    {
+                        hookedObj = hit.transform.gameObject;
+                        adjustmentPoint = grapplePoint = hit.point;
+                        adjustmentPoint.y += 1f + heightOffset;
+                        if(!IsCentered(adjustmentPoint))
+                        // Add a TEENY bit more to the collision point...
+                           adjustmentPoint = AdjustedGrapple(adjustmentPoint);
+
+                        if (adjustmentPoint == Vector3.zero)
                         {
-                            hookedObj = hitt.transform.gameObject;
-                            firedHook = true;
-                            adjustmentPoint = grapplePoint = hitt.point;
-                            adjustmentPoint.y += heightOffset;
-                            Debug.DrawLine(mainCamera.position, hitt.point, Color.red);
-                            hookTmp = Instantiate(hookObj);
-                            hookTmp.transform.position = playerControl.transform.position;
-                            hookTmp.transform.localPosition = playerControl.transform.localPosition;
-                            hookTmp.transform.LookAt(hookedObj.transform);
-                            trb = hookTmp.AddComponent<Rigidbody>();
-                            trb.isKinematic = false;
-                            trb.useGravity = false;
+                            isTargeting = false;
+                            return;
                         }
+                        else
+                            isTargeting = true;
+
+                    }
+
+                    if (Input.GetKeyDown(KeyCode.Mouse1) == true)
+                    {
+                        isTargeting = false;
+                        firedHook = true;
+                        hookTmp = Instantiate(hookObj);
+                        Vector3 worldP;
+                        worldP = new Vector3(transform.position.x, transform.position.y + heightOffset / 2, transform.position.z + 0.3f);
+                        hookTmp.transform.position = worldP;
+                        hookTmp.transform.LookAt(hookedObj.transform);
+                        trb = hookTmp.AddComponent<Rigidbody>();
+                        trb.isKinematic = false;
+                        trb.useGravity = false;
                     }
                 }
             }
@@ -86,6 +114,12 @@ namespace ShadowedSouls
 
         private void Update()
         {
+            if (Input.GetKeyDown(KeyCode.Escape))
+                if (Cursor.lockState == CursorLockMode.Locked)
+                    Cursor.lockState = CursorLockMode.None;
+                else
+                    Cursor.lockState = CursorLockMode.Locked;
+
             if (firedHook || isSecured)
             {
                 momentum += Time.deltaTime * speed;
@@ -107,38 +141,18 @@ namespace ShadowedSouls
             }
 
 
-            if (isSecured && Vector3.Distance(playerControl.transform.position, adjustmentPoint) > 0.05f)
+            if (isSecured && transform.position != adjustmentPoint)
             {
                 rb.position = Vector3.MoveTowards(rb.position, adjustmentPoint, step);
             }
-            else if (isSecured && Vector3.Distance(playerControl.transform.position, adjustmentPoint) <= 0.05f)
+       
+            else if (isSecured && transform.position == adjustmentPoint)
             {
                 Unhook();
             }
         }
-
         #endregion
-
-    #region Colliders
-        private void OnCollisionExit(Collision collision)
-        {
-            if (collision.transform.tag == "Hookable" || collision.transform.tag == "Climbable")
-                if (isSecured && onGrappleSurface)
-                    onGrappleSurface = false;
-                else if (isSecured)
-                {
-                    Unhook();
-                    onGrappleSurface = false;
-                }
-        }
-
-        private void OnCollisionEnter(Collision collision)
-        {
-            if (collision.transform.tag == "Hookable" || collision.transform.tag == "Climbable")
-                onGrappleSurface = true;
-        }
-        #endregion
-
+            
         private void Unhook()
         {
             isSecured = false;
@@ -149,6 +163,99 @@ namespace ShadowedSouls
             Destroy(hookTmp);
             if (resetKinematic)
                 rb.isKinematic = false;
+        }
+
+        private Vector3 AdjustedGrapple(Vector3 tmp, bool firstPass = true)
+        {
+            Vector3 ret = tmp;
+
+            ret.x += 0.45f;
+            if (IsCentered(ret))
+                return ret;
+            else
+            {
+                ret.x += 0.45f;
+                if (IsCentered(ret))
+                    return ret;
+            }
+
+            ret = tmp;
+            ret.x -= 0.45f;
+
+            if (IsCentered(ret))
+                return ret;
+            else
+            {
+                ret.x -= 0.45f;
+                if (IsCentered(ret))
+                    return ret;
+            }
+
+            ret = tmp;
+            ret.z += 0.45f;
+
+            if (IsCentered(ret))
+                return ret;
+            else
+            {
+                ret.z += 0.45f;
+                if (IsCentered(ret))
+                    return ret;
+            }
+
+            ret = tmp;
+            ret.z -= 0.45f;
+
+            if (IsCentered(ret))
+                return ret;
+            else
+            {
+                ret.z -= 0.45f;
+                if (IsCentered(ret))
+                    return ret;
+            }
+
+            if (firstPass)
+            {
+                ret = tmp;
+                ret.z += 0.45f;
+                ret.x += 0.45f;
+                ret = AdjustedGrapple(ret, false);
+                if (ret != Vector3.zero)
+                    if (IsCentered(ret))
+                        return ret;
+
+                ret = tmp;
+                ret.z -= 0.45f;
+                ret.x -= 0.45f;
+                ret = AdjustedGrapple(ret, false);
+                if (ret != Vector3.zero)
+                    if(IsCentered(ret))
+                        return ret;
+            }
+
+            return Vector3.zero;
+        }
+
+        private bool IsCentered(Vector3 ret)
+        {
+            if (Physics.Raycast(new Ray(ret + new Vector3(1f, 1f, 1f), Vector3.down), 2f + heightOffset)
+               && Physics.Raycast(new Ray(ret + new Vector3(-1f, 1f, 1f), Vector3.down), 2f + heightOffset)
+               && Physics.Raycast(new Ray(ret + new Vector3(1f, 1f, -1f), Vector3.down), 2f + heightOffset)
+               && Physics.Raycast(new Ray(ret + new Vector3(-1f, 1f, -1f), Vector3.down), 2f + heightOffset))
+                if(Physics.Raycast(new Ray(ret, Vector3.down), out RaycastHit hitCenter, 2f + heightOffset))
+                    if(hitCenter.transform.tag == "Hookable")
+                       return true;
+
+            return false;
+        }
+        
+        private void OnGUI()
+        {
+            if(isTargeting)
+            {
+                GUI.Box(new Rect(new Vector2(Screen.width / 2, Screen.height / 2), new Vector2(150, 20)), "Right Click To Grapple");
+            }
         }
     }
 }
